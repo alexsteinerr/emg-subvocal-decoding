@@ -193,7 +193,6 @@ class ChineseEvaluator:
         total_val_loss = 0.0
         total_samples = 0
         
-        # Use simpler generation config for evaluation
         gen_config = {
             'max_new_tokens': 20,
             'min_new_tokens': 3,
@@ -207,7 +206,6 @@ class ChineseEvaluator:
         with torch.no_grad():
             for batch in tqdm(val_loader, desc="Evaluating", leave=False):
                 try:
-                    # Simple forward pass to get loss
                     eeg_data = [region.to(device) for region in batch['eeg']]
                     labels = batch['labels'].to(device)
                     text_ids = batch.get('decoder_input_ids', labels[:, :-1]).to(device)
@@ -219,7 +217,6 @@ class ChineseEvaluator:
                     total_val_loss += loss.item() * batch_size
                     total_samples += batch_size
                     
-                    # Generation with error handling
                     try:
                         generated_ids = model.generate(eeg_data=eeg_data, **gen_config)
                         

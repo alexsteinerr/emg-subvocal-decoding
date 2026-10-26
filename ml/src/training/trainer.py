@@ -31,7 +31,7 @@ class sEMGTrainer:
             for b in range(batch_size):
                 sample = region_data[b:b+1].clone()
                 
-                # Random temporal shift (paper mentions temporal dependencies)
+                # Random temporal shift 
                 shift = torch.randint(-3, 4, (1,)).item()
                 sample = torch.roll(sample, shifts=shift, dims=-1)
                 
@@ -56,12 +56,9 @@ class sEMGTrainer:
             labels = batch['labels'].to(self.device)
             text_ids = batch['decoder_input_ids'].to(self.device)
             
-            # Apply simple augmentations
             augmented_semg = self.apply_augmentations(semg_data)
             
             self.optimizer.zero_grad()
-            
-            # Forward pass - model now handles all loss computation internally
             outputs = self.model(
                 semg_data=augmented_semg, 
                 input_ids=text_ids, 

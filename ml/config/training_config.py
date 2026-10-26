@@ -4,7 +4,6 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
 CONFIG = {
-    # ── data ────────────────────────────────────────────────────────────────
     'data_dir':       './data/',
     'save_dir':       './checkpoints/',
     'signal_length':  6000,
@@ -12,13 +11,11 @@ CONFIG = {
     'sample_rate':    1000,
     'max_samples':    None,
 
-    # ── model ───────────────────────────────────────────────────────────────
     'hidden_dim':       512,     # encoder output / seq feature dim
     'decoder_hidden':   256,     # phoneme decoder internal width
     'num_gru_layers':   2,
     'dropout':          0.2,
 
-    # ── LM decoding (pyctcdecode + KenLM) ───────────────────────────────────
     # Set lm_path to a .arpa or .bin KenLM model file, or None for no LM.
     # Build one with: kenlm/build/bin/lmplz -o 4 < corpus.txt > lm.arpa
     'lm_path':          None,
@@ -26,7 +23,6 @@ CONFIG = {
     'lm_beta':          1.0,      # word insertion bonus
     'beam_width':       50,       # beam search width at inference
 
-    # ── training ────────────────────────────────────────────────────────────
     'epochs':           300,
     'batch_size':       8,
     'accumulation_steps': 4,
@@ -37,12 +33,10 @@ CONFIG = {
     'warmup_ratio':     0.1,
     'patience':         10,
 
-    # ── dataset splits ──────────────────────────────────────────────────────
     'train_split':  0.9,
     'val_split':    0.1,
     'seed':         42,
 
-    # ── misc ────────────────────────────────────────────────────────────────
     'mixed_precision': True,
     'num_workers':     4,
 }

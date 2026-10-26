@@ -6,7 +6,7 @@ import numpy as np
 from typing import Optional
 
 from .encoder import Encoder
-from .decoder import PhonemeDecoder, PhonemeToWordDecoder, PHONEME2IDX, ARPABET_PHONEMES
+from .decoder import PhonemeDecoder, PhonemeToWordDecoder, ARPABET_PHONEMES
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,6 @@ class sEMGModel(nn.Module):
         trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
         logger.info(f"sEMGModel — total params: {total:,} | trainable: {trainable:,}")
 
-    # ---------------------------------------------------------------------- #
     def _to_device_tensor(self, x):
         device = next(self.parameters()).device
         if isinstance(x, list):
@@ -69,7 +68,6 @@ class sEMGModel(nn.Module):
             return x.to(device)
         return torch.tensor(x, dtype=torch.float32, device=device)
 
-    # ---------------------------------------------------------------------- #
     def forward(
         self,
         semg_data:       torch.Tensor,
@@ -82,19 +80,15 @@ class sEMGModel(nn.Module):
         if semg_data.dim() == 2:
             semg_data = semg_data.unsqueeze(0)
 
-        # ---- encode ------------------------------------------------------ #
         seq_features, pooled = self.encoder(semg_data)   # [B,512,T_out], [B,D]
 
         # guard NaN
         if torch.isnan(seq_features).any():
             seq_features = torch.nan_to_num(seq_features)
 
-        # Compute actual frame lengths AFTER encoder downsampling.
-        # CTC requires these to be correct — passing T_in here causes blank collapse
-        # because CTC thinks there are 6000 frames for ~10 phoneme targets.
+        # Compute actual frame lengths after encoder downsampling
         T_out = seq_features.size(2)
         if input_lengths is None:
-            # All samples in the batch have the same padded length → all T_out frames valid
             input_lengths = torch.full(
                 (seq_features.size(0),), T_out,
                 dtype=torch.long, device=seq_features.device
@@ -104,7 +98,6 @@ class sEMGModel(nn.Module):
             ds = getattr(self.encoder, 'downsample_factor', 64)
             input_lengths = (input_lengths.float() / ds).floor().long().clamp(min=1)
 
-        # ---- decode ------------------------------------------------------ #
         out = self.decoder(
             seq_features=seq_features,
             input_lengths=input_lengths,
@@ -116,17 +109,8 @@ class sEMGModel(nn.Module):
         out['total_loss']      = out['loss']
         return out
 
-    # ---------------------------------------------------------------------- #
     @torch.no_grad()
     def generate(self, semg_data, use_beam: bool = True, **kwargs):
-        """
-        Full pipeline: sEMG → encoder → CTC phonemes → word segmentation.
-
-        Returns
-        -------
-        List[str] — one decoded word string per batch item,
-                    e.g. ['your phone is under the pillow']
-        """
         semg_data = self._to_device_tensor(semg_data)
         if semg_data.dim() == 2:
             semg_data = semg_data.unsqueeze(0)
@@ -138,13 +122,13 @@ class sEMGModel(nn.Module):
         out       = self.decoder(seq_features)
         log_probs = out['log_probs']          # [B, T, N_PHONEMES]
 
-        # Step 1: CTC decode → phoneme sequences
+        # CTC decode → phoneme sequences
         if use_beam:
             phone_seqs = self.decoder.decode_beam(log_probs)
         else:
             phone_seqs = self.decoder.decode_greedy(log_probs)
 
-        # Step 2: phoneme sequences → word strings via CMU dict Viterbi
+        # phoneme sequences → word strings via CMU dict Viterbi
         word_strings = self.p2w.decode_batch(phone_seqs)
 
         return word_strings   # List[str], one per batch item

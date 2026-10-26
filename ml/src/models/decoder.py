@@ -1,5 +1,4 @@
 # decoder.py
-# Phoneme CTC decoder + n-gram LM beam search (no LLM)
 
 import torch
 import torch.nn as nn
@@ -9,14 +8,6 @@ from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# --------------------------------------------------------------------------- #
-#  Standard ARPAbet phoneme inventory                                         #
-#                                                                             #
-#  IMPORTANT: <blank> must be LAST so its index matches where pyctcdecode     #
-#  appends its own blank token. pyctcdecode.build_ctcdecoder receives only    #
-#  the 40 non-blank labels and appends "" at position 40 internally.          #
-#  CTCLoss blank=CTC_BLANK_IDX=40 must agree with this.                      #
-# --------------------------------------------------------------------------- #
 ARPABET_PHONEMES = [
     # idx 0-39: real phones (passed to pyctcdecode)
     "<sil>",    # idx 0  – silence / padding
@@ -27,16 +18,13 @@ ARPABET_PHONEMES = [
     "OW", "OY", "P",  "R",  "S",  "SH",
     "T",  "TH", "UH", "UW", "V",  "W",
     "Y",  "Z",  "ZH",
-    # idx 40: CTC blank — keep last, mirrors pyctcdecode's appended blank
     "<blank>",
 ]
 PHONEME2IDX   = {p: i for i, p in enumerate(ARPABET_PHONEMES)}
 N_PHONEMES    = len(ARPABET_PHONEMES)   # 41
 CTC_BLANK_IDX = PHONEME2IDX["<blank>"] # 40
 
-# Labels passed to pyctcdecode (everything except the trailing blank)
-_DECODER_LABELS = ARPABET_PHONEMES[:-1]  # 40 entries; pyctcdecode appends "" at idx 40
-
+_DECODER_LABELS = ARPABET_PHONEMES[:-1]  # 40 entries
 
 class TemporalCNNBlock(nn.Module):
     """Dilated causal-ish conv block for sequence modelling."""
@@ -54,29 +42,6 @@ class TemporalCNNBlock(nn.Module):
 
 
 class PhonemeDecoder(nn.Module):
-    """
-    Converts encoder sequential features → phoneme log-probabilities.
-
-    Architecture
-    ────────────
-    encoder_feat  [B, C_enc, T]
-        │
-        ▼
-    input_proj    [B, hidden, T]
-        │
-        ▼
-    4× TemporalCNNBlock  (dilations 1,2,4,8)
-        │
-        ▼
-    Bidirectional GRU
-        │
-        ▼
-    Linear → log_softmax  [B, T, N_PHONEMES]
-
-    Training  : CTC loss
-    Inference : greedy collapse  OR  beam search with KenLM via pyctcdecode
-    """
-
     def __init__(
         self,
         encoder_dim:   int = 512,     # channels from the encoder's sequential output
@@ -95,14 +60,12 @@ class PhonemeDecoder(nn.Module):
         self.beta       = beta
         self.beam_width = beam_width
 
-        # --- feature projection -------------------------------------------
         self.input_proj = nn.Sequential(
             nn.Conv1d(encoder_dim, hidden_dim, kernel_size=1),
             nn.BatchNorm1d(hidden_dim),
             nn.GELU(),
         )
 
-        # --- temporal modelling -------------------------------------------
         self.tcn = nn.Sequential(
             TemporalCNNBlock(hidden_dim, 3, 1),
             TemporalCNNBlock(hidden_dim, 3, 2),
@@ -110,7 +73,6 @@ class PhonemeDecoder(nn.Module):
             TemporalCNNBlock(hidden_dim, 3, 8),
         )
 
-        # --- sequential context -------------------------------------------
         self.bigru = nn.GRU(
             hidden_dim, hidden_dim,
             num_layers=num_gru_layers,
@@ -120,7 +82,6 @@ class PhonemeDecoder(nn.Module):
         )
         self.gru_norm = nn.LayerNorm(hidden_dim * 2)
 
-        # --- output head --------------------------------------------------
         self.classifier = nn.Sequential(
             nn.Dropout(dropout),
             nn.Linear(hidden_dim * 2, N_PHONEMES),
@@ -129,7 +90,6 @@ class PhonemeDecoder(nn.Module):
         self._init_weights()
         self._decoder = None   # lazy-loaded pyctcdecode decoder
 
-    # ---------------------------------------------------------------------- #
     def _init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Linear):
@@ -141,7 +101,6 @@ class PhonemeDecoder(nn.Module):
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
-    # ---------------------------------------------------------------------- #
     def forward(
         self,
         seq_features: torch.Tensor,          # [B, C_enc, T]
@@ -149,14 +108,6 @@ class PhonemeDecoder(nn.Module):
         phoneme_targets: Optional[torch.Tensor] = None, # [sum_target_lens]
         target_lengths:  Optional[torch.Tensor] = None, # [B]
     ) -> dict:
-        """
-        Returns
-        -------
-        dict with keys:
-          log_probs      – [B, T, N_PHONEMES]  (log-softmax)
-          input_lengths  – [B]  (after any subsampling)
-          loss           – scalar CTC loss (only when targets provided)
-        """
         x = self.input_proj(seq_features)    # [B, hidden, T]
         x = self.tcn(x)                      # [B, hidden, T]
         x = x.transpose(1, 2)               # [B, T, hidden]
@@ -181,7 +132,6 @@ class PhonemeDecoder(nn.Module):
 
         result = {'log_probs': log_probs, 'input_lengths': out_lengths}
 
-        # ---- CTC loss ---------------------------------------------------- #
         if phoneme_targets is not None and target_lengths is not None:
             # CTC expects [T, B, C]
             lp_ctc = log_probs.transpose(0, 1)
@@ -198,9 +148,6 @@ class PhonemeDecoder(nn.Module):
 
         return result
 
-    # ---------------------------------------------------------------------- #
-    #  Decoding helpers                                                        #
-    # ---------------------------------------------------------------------- #
     def _get_ctc_decoder(self):
         """Lazy-load pyctcdecode beam-search decoder (with optional KenLM)."""
         if self._decoder is not None:
@@ -266,24 +213,12 @@ class PhonemeDecoder(nn.Module):
                     matched = True
                     break
             if not matched:
-                tokens.append(s[0])   # unknown char — emit as-is
+                tokens.append(s[0])   # unknown char
                 s = s[1:]
         return tokens
 
     @torch.no_grad()
     def decode_beam(self, log_probs: torch.Tensor) -> List[List[str]]:
-        """
-        Beam-search CTC decode with optional KenLM, followed by phoneme
-        re-tokenization to undo pyctcdecode's string concatenation.
-
-        Falls back to greedy decode when no LM is loaded — pyctcdecode's
-        beam search without a language model adds no benefit for phoneme
-        vocabularies and its concatenated output requires the extra
-        re-tokenization step anyway.
-
-        log_probs: [B, T, N_PHONEMES]
-        Returns:   List[List[str]]  — one phoneme list per batch item
-        """
         # If no KenLM is loaded, greedy is equally good and avoids the
         # pyctcdecode concatenation issue entirely.
         if self.lm_path is None:
@@ -312,12 +247,6 @@ class PhonemeDecoder(nn.Module):
         return [" ".join(p) for p in phoneme_seqs]
 
 
-# =========================================================================== #
-#  Phoneme → Word decoder                                                      #
-#  Uses the CMU Pronouncing Dictionary (via NLTK) as a reverse lookup and     #
-#  runs Viterbi beam search to segment a flat phoneme stream into words.       #
-# =========================================================================== #
-
 class PhonemeToWordDecoder:
     """
     Converts a flat ARPAbet phoneme sequence into a word string.
@@ -331,12 +260,6 @@ class PhonemeToWordDecoder:
        N phonemes; keep the top-K partial hypotheses scored by a
        simple unigram log-probability (word frequency from CMU counts).
     3. Return the best complete hypothesis.
-
-    Usage
-    -----
-    >>> p2w = PhonemeToWordDecoder()
-    >>> p2w.decode(['Y', 'AO', 'R', 'F', 'OW', 'N'])
-    'your phone'
     """
 
     def __init__(self, beam_size: int = 20, max_word_phones: int = 12):
@@ -346,10 +269,6 @@ class PhonemeToWordDecoder:
         self._unigram:      Optional[dict] = None   # word → log_prob
         self._build_cmu_index()
 
-    # ---------------------------------------------------------------------- #
-    # Words to EXCLUDE from the CMU reverse index entirely.
-    # These are rare/foreign/abbreviation entries that always beat common
-    # words with identical pronunciations (e.g. "fone"→phone, "trois"→three).
     _STOPLIST = {
         # common CMU junk that shadows real words
         'fone', 'phon', 'trois', 'ertha', 'der', 'dhe', 'bey', 'gae',
@@ -387,7 +306,6 @@ class PhonemeToWordDecoder:
             self._unigram     = {}
             return
 
-        # ---- Step 1: build word frequency table -------------------------- #
         word_freq: dict = {}
 
         # Try wordfreq first (most accurate)
@@ -418,7 +336,7 @@ class PhonemeToWordDecoder:
             except Exception:
                 logger.info("Brown corpus unavailable — using Zipf heuristic")
 
-        # ---- Step 2: build reverse phoneme index, skipping junk words ---- #
+        # build reverse phoneme index, skipping junk words #
         reverse: dict = {}
         all_words:  set = set()
 
@@ -436,7 +354,7 @@ class PhonemeToWordDecoder:
 
         self._cmu_reverse = reverse
 
-        # ---- Step 3: assign log-probabilities ---------------------------- #
+        # assign log-probabilities #
         unigram: dict = {}
         for word in all_words:
             if _wordfreq_available:
@@ -450,13 +368,7 @@ class PhonemeToWordDecoder:
                 unigram[word] = math.log(count / (_brown_total + 1))
 
             else:
-                # Zipf-law heuristic: shorter common words are more frequent.
-                # log P ≈ -1.5 * log(rank); we approximate rank by length.
-                # This strongly favours "phone" (5) over "ertha" (5) via
-                # whether the word appears at all in a common-word check.
-                # We use a simple length+syllable proxy:
-                #   base score = -len(word)   (shorter = higher prob)
-                #   bonus      = +2 if word has ≤6 chars (very common words)
+
                 length_score = -len(word) + (2 if len(word) <= 6 else 0)
                 unigram[word] = float(length_score)
 
@@ -464,28 +376,17 @@ class PhonemeToWordDecoder:
         logger.info(f"CMU index ready: {len(reverse):,} phone sequences, "
                     f"{len(all_words):,} words")
 
-    # ---------------------------------------------------------------------- #
     def decode(self, phonemes: List[str]) -> str:
         """
         Segment a flat phoneme list into the most likely word sequence.
-
-        Parameters
-        ----------
-        phonemes : list of ARPAbet phoneme strings, e.g. ['Y','AO','R',...]
-
-        Returns
-        -------
-        Decoded word string, e.g. 'your phone'
         """
         if not phonemes or not self._cmu_reverse:
             return " ".join(phonemes)   # fallback: return raw phones
 
-        # Strip stress if present (decode_beam may leave them digit-free already)
+        # Strip stress if present
         phones = [p.rstrip('012') for p in phonemes]
         N      = len(phones)
 
-        # Each hypothesis: (score, word_list, position)
-        # We store a list of (neg_log_prob, words, end_pos) – min-heap style
         import heapq
 
         # heap items: (neg_score, words_so_far, current_position)
@@ -500,7 +401,7 @@ class PhonemeToWordDecoder:
                 # Complete hypothesis
                 return " ".join(words)
 
-            # Prune: only keep beam_size hypotheses per position
+            # only keep beam_size hypotheses per position
             if pos in best and best[pos][0] >= score:
                 continue
             best[pos] = (score, words)
@@ -517,8 +418,7 @@ class PhonemeToWordDecoder:
                         new_pos     = pos + span
                         heapq.heappush(heap, (-new_score, new_words, new_pos))
 
-            # --- OOV fallback: emit the single phoneme as-is -------------- #
-            # This prevents the decoder from getting stuck on unknown phones.
+            # prevents the decoder from getting stuck on unknown phones.
             oov_score = score - 5.0   # penalise OOV heavily
             heapq.heappush(heap, (-oov_score, words + [phones[pos]], pos + 1))
 
@@ -528,7 +428,6 @@ class PhonemeToWordDecoder:
         # Last resort
         return " ".join(phones)
 
-    # ---------------------------------------------------------------------- #
     def decode_batch(self, phoneme_seqs: List[List[str]]) -> List[str]:
         """Decode a batch of phoneme sequences to word strings."""
         return [self.decode(phones) for phones in phoneme_seqs]

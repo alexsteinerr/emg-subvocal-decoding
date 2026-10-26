@@ -38,9 +38,8 @@ class Encoder(nn.Module):
         super().__init__()
         self.hidden_dim = hidden_dim
 
-        # ---- convolutional stem with temporal downsampling -----------------#
         # Input T=6000 → after 3 stride-4 layers → T≈94 frames
-        # This is CRITICAL for CTC: target phoneme seqs are ~10-20 tokens,
+        # CTC target phoneme seqs are ~10-20 tokens,
         # so we need T in the 50-200 range to avoid blank collapse.
         # stride=4 per layer: 6000 → 1500 → 375 → 94
         self.conv_layers = nn.ModuleList([
@@ -71,12 +70,10 @@ class Encoder(nn.Module):
         # Total downsampling factor: 4 * 4 * 4 = 64
         self.downsample_factor = 64
 
-        # ---- sequence-level self-attention ------------------------------- #
         self.self_attention = nn.MultiheadAttention(512, num_heads=8,
                                                     batch_first=True, dropout=0.1)
         self.layer_norm = nn.LayerNorm(512)
 
-        # ---- optional projection to hidden_dim for the pooled embedding -- #
         self.pool_proj = nn.Sequential(
             nn.Linear(512, hidden_dim),
             nn.LayerNorm(hidden_dim),
@@ -85,7 +82,6 @@ class Encoder(nn.Module):
 
         self._initialize_weights()
 
-    # ---------------------------------------------------------------------- #
     def _initialize_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Linear):
@@ -95,18 +91,7 @@ class Encoder(nn.Module):
                 nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
                 if m.bias is not None: nn.init.zeros_(m.bias)
 
-    # ---------------------------------------------------------------------- #
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Parameters
-        ----------
-        x : [B, C, T_in]
-
-        Returns
-        -------
-        seq_features : [B, 512, T_out]   T_out ≈ T_in / 64  (for CTC head)
-        pooled       : [B, hidden_dim]   attention-pooled global embedding
-        """
         if isinstance(x, list):
             device = next(self.parameters()).device
             x = torch.stack(x).to(device) if isinstance(x[0], torch.Tensor) \
@@ -122,7 +107,7 @@ class Encoder(nn.Module):
                 identity = F.adaptive_avg_pool1d(identity, x.shape[-1])
             x = F.gelu(x + identity)
 
-        # self-attention over (now short) time dimension
+        # self-attention over time dimension
         x_t = x.transpose(1, 2)                          # [B, T_out, 512]
         attn_out, _ = self.self_attention(x_t, x_t, x_t)
         x_t = self.layer_norm(x_t + attn_out)

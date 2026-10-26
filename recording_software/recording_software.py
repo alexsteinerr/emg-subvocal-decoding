@@ -16,7 +16,6 @@ import random
 from datetime import datetime
 from scipy import signal
 
-# --- CONFIGURATION ---
 CONFIG_FILE = "config.json"
 DEFAULT_CONF = {
     "baud_rate": 2000000, 
@@ -102,15 +101,12 @@ class DataManager:
         sess_dir = DataManager.get_session_dir(user_id)
         file_path = os.path.join(sess_dir, filename)
         
-        # 1. Delete actual file
         if os.path.exists(file_path):
             try:
                 os.remove(file_path)
                 print(f"Deleted {file_path}")
             except Exception as e:
                 print(f"Error deleting file: {e}")
-
-        # 2. Remove from manifest.json
         man_path = os.path.join(sess_dir, "manifest.json")
         if os.path.exists(man_path):
             try:
@@ -124,8 +120,6 @@ class DataManager:
             except Exception as e:
                 print(f"Error updating manifest: {e}")
 
-        # 3. Remove from splits (train_list.txt or test_list.txt)
-        # Since we don't know exactly which file without parsing ID, we check both or reconstruct path
         splits_dir = os.path.join(CONF["root_dir"], "splits")
         date_str = datetime.now().strftime("%Y%m%d")
         sess_name = f"Session_{date_str}"
@@ -273,7 +267,6 @@ class SerialWorker:
         except: return
 
         while self.running and self.ser and self.ser.is_open:
-            # OPTIMIZED BATCH READING
             lines_to_process = []
             try:
                 while self.ser.in_waiting:
@@ -378,11 +371,9 @@ class App:
         self.btn_start.pack(side=tk.LEFT, padx=20)
         self.btn_stop = tk.Button(ctrl, text="■ STOP (Next)", bg="#333", fg="#aaa", font=("Arial", 12, "bold"), width=12, command=self.stop_rec, state=tk.DISABLED)
         self.btn_stop.pack(side=tk.LEFT, padx=10)
-        
-        # --- NEW REDO BUTTON ---
+
         self.btn_redo = tk.Button(ctrl, text="⟲ REDO", bg="#333", fg="#FFD700", font=("Arial", 12, "bold"), width=12, command=self.redo_last, state=tk.DISABLED)
         self.btn_redo.pack(side=tk.LEFT, padx=10)
-        # -----------------------
 
         self.chk_autoscale = tk.Checkbutton(ctrl, text="Auto Scale Axis", variable=self.autoscale_var, bg="#1e1e1e", fg="#00E5FF", selectcolor="#333", activebackground="#1e1e1e", activeforeground="#00E5FF", font=("Arial", 10, "bold"))
         self.chk_autoscale.pack(side=tk.LEFT, padx=20)
@@ -565,20 +556,15 @@ class App:
     def redo_last(self):
         """Deletes the last recording and moves the batch pointer back"""
         if self.last_saved_file and self.last_saved_user:
-            # 1. Delete physical file and metadata entries
             DataManager.delete_entry(self.last_saved_user, self.last_saved_file)
             
-            # 2. Reset redo state
             self.last_saved_file = None
             self.last_saved_user = None
             self.btn_redo.config(state=tk.DISABLED, bg="#333")
             
-            # 3. Refresh counts (count will go down by 1)
             self.refresh_counts()
-            
-            # 4. Rewind batch pointer to the previous item so user can re-record it
+
             if self.batch_list:
-                # Decrement pointer (python modulo handles negative numbers correctly)
                 self.batch_ptr = (self.batch_ptr - 1) % len(self.batch_list)
                 self.select_current_batch_item()
 

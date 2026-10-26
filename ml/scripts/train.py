@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# train.py — CTC phoneme training for sEMG-to-text
 
 import os
 import sys
@@ -23,7 +22,6 @@ from src.models.model import sEMGModel
 from src.data.dataset import sEMGDataset, semg_collate_fn
 from config.training_config import CONFIG, get_optimizer_groups
 
-# ── logging ──────────────────────────────────────────────────────────────── #
 ts = datetime.now().strftime('%Y%m%d_%H%M%S')
 logging.basicConfig(
     level=logging.INFO,
@@ -35,8 +33,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
-# ── model factory ─────────────────────────────────────────────────────────── #
 def create_model(device: str = 'cpu') -> sEMGModel:
     model = sEMGModel(
         input_channels=CONFIG['n_channels'],
@@ -54,8 +50,6 @@ def create_model(device: str = 'cpu') -> sEMGModel:
     logger.info(f"Model ready — total: {total:,}  trainable: {trainable:,}")
     return model
 
-
-# ── training loop ─────────────────────────────────────────────────────────── #
 def train_epoch(model, loader, optimizer, scheduler, scaler, device, epoch):
     model.train()
     total_loss, steps = 0.0, 0
@@ -120,7 +114,6 @@ def validate(model, loader, device):
     return total_loss / max(steps, 1)
 
 
-# ── qualitative decoding samples ─────────────────────────────────────────── #
 def generate_samples(model, loader, device, n=3):
     model.eval()
     logger.info("\n─── Qualitative decode samples ───────────────────────────")
@@ -141,10 +134,7 @@ def generate_samples(model, loader, device, n=3):
                 count += 1
     logger.info("──────────────────────────────────────────────────────────\n")
 
-
-# ── main ──────────────────────────────────────────────────────────────────── #
 def main():
-    # reproducibility
     seed = CONFIG.get('seed', 42)
     random.seed(seed)
     np.random.seed(seed)
@@ -155,7 +145,6 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logger.info(f"Device: {device}")
 
-    # ── dataset ──────────────────────────────────────────────────────────── #
     logger.info("Loading dataset …")
     full_ds = sEMGDataset(
         data_dir=CONFIG['data_dir'],
@@ -184,7 +173,6 @@ def main():
         pin_memory=True
     )
 
-    # ── model + optimiser ────────────────────────────────────────────────── #
     model = create_model(device)
     epochs = CONFIG.get('epochs', 100)
     total_steps = len(train_loader) * epochs
@@ -202,14 +190,12 @@ def main():
         else None
     )
 
-    # ── checkpointing ────────────────────────────────────────────────────── #
     save_dir = os.path.join(CONFIG['save_dir'], f'run_{ts}')
     os.makedirs(save_dir, exist_ok=True)
 
     best_val, patience_ctr = float('inf'), 0
     patience = CONFIG.get('patience', 10)
 
-    # ── training ─────────────────────────────────────────────────────────── #
     logger.info("Starting CTC phoneme training …")
     for epoch in range(1, epochs + 1):
         logger.info(f"=== Epoch {epoch}/{epochs} ===")
@@ -224,7 +210,6 @@ def main():
         if epoch % 5 == 0:
             generate_samples(model, train_loader, device)
 
-        # save last model
         torch.save(model.state_dict(), os.path.join(save_dir, 'last_model.pt'))
 
         if val_loss < best_val:
@@ -236,7 +221,7 @@ def main():
             logger.info(f"  No improvement. Patience {patience_ctr}/{patience}")
             if patience_ctr >= patience:
                 logger.info("Early stopping.")
-                #break  # stop training
+                break 
 
     logger.info("Training complete.")
 
