@@ -1,4 +1,4 @@
-# sEMG-Based Subvocal Inner-Speech Decoding Device — Short Version
+# sEMG-Based Subvocal Inner-Speech Decoding Device
 
 This project is an experimental system for decoding subvocal inner speech from surface electromyography (sEMG) signals produced by speech-related facial and submandibular muscles. It uses non-invasive electrodes, real-time signal processing, a deep-learning sEMG encoder, and a transformer language decoder to generate text from muscle activity. The goal is a future wearable communication interface for people with speech impairments, such as ALS. The project does **not** use EEG or decode thoughts directly from brain activity.
 
