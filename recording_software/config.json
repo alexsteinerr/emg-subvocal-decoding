@@ -1,0 +1,22 @@
+{
+    "baud_rate": 2000000,
+    "sample_rate": 1000,
+    "visible_sec": 2,
+    "channels": 5,
+    "scale_factor": 0.02235,
+    "root_dir": "Harvard_EMG_Dataset",
+    "targets": {
+        "Calculate 342 multiplied by 14.":15,
+        "My neck is sore; please adjust the pillow behind me.":15,
+        "Your phone is under the pillow":15
+    },
+    "hp_cut_hz": 0.5,
+    "hp_order": 1,
+    "bandpass_low_hz": 20,
+    "bandpass_high_hz": 150,
+    "bandpass_order": 4,
+    "mains_freq": 50.0,
+    "notch_q": 30.0,
+    "heartbeat_remove": true,
+    "heartbeat_width_s": 0.12
+}

@@ -1,0 +1,32 @@
+[
+  {
+    "filename": "s01_sent255_112211.pkl",
+    "label": "The prince ordered his head chopped off.",
+    "id": 255
+  },
+  {
+    "filename": "s01_sent048_113024.pkl",
+    "label": "Hop over the fence and plunge in.",
+    "id": 48
+  },
+  {
+    "filename": "s01_sent194_114245.pkl",
+    "label": "The paper box is full of thumb tacks.",
+    "id": 194
+  },
+  {
+    "filename": "s01_sent130_120249.pkl",
+    "label": "The tiny girl took off her hat.",
+    "id": 130
+  },
+  {
+    "filename": "s01_sent274_121858.pkl",
+    "label": "The red tape bound the smuggled food.",
+    "id": 274
+  },
+  {
+    "filename": "s01_sent337_121904.pkl",
+    "label": "Women form less than half of the group.",
+    "id": 337
+  }
+]
